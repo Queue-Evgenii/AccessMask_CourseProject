@@ -55,7 +55,7 @@ void DecodeAccessMask(DWORD mask, std::stringstream& result) {
   if (mask & SYNCHRONIZE) result << "SYNCHRONIZE" << std::endl;
 }
 
-void RetrieveAceInfo(PACE_HEADER pAceHeader, std::set<std::string>& uniqueUsers, std::stringstream& result) {
+void RetrieveAceInfo(PACE_HEADER pAceHeader, std::stringstream& result) {
   ACCESS_ALLOWED_ACE* pAce = (ACCESS_ALLOWED_ACE*)pAceHeader;
   char* accountName = NULL;
   char* domainName = NULL;
@@ -80,22 +80,21 @@ void RetrieveAceInfo(PACE_HEADER pAceHeader, std::set<std::string>& uniqueUsers,
   free(domainName);
 }
 
-char* RetrieveFileAccessInfo(const char* filePath) {
+char* RetrieveFileAccessInfo(HANDLE fileHandle) {
   static std::stringstream result;
   result.str("");
 
   PSECURITY_DESCRIPTOR pSD;
-  if (GetNamedSecurityInfoA(filePath, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, NULL, NULL, NULL, NULL, &pSD) == ERROR_SUCCESS) {
+  if (GetSecurityInfo(fileHandle, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, NULL, NULL, NULL, NULL, &pSD) == ERROR_SUCCESS) {
     PACL pDacl;
     BOOL bDaclPresent, bDaclDefaulted;
 
     if (GetSecurityDescriptorDacl(pSD, &bDaclPresent, &pDacl, &bDaclDefaulted)) {
       if (bDaclPresent) {
-        std::set<std::string> uniqueUsers;
         for (DWORD i = 0; i < pDacl->AceCount; ++i) {
           PACE_HEADER pAceHeader;
           if (GetAce(pDacl, i, (LPVOID*)&pAceHeader)) {
-            RetrieveAceInfo(pAceHeader, uniqueUsers, result);
+            RetrieveAceInfo(pAceHeader, result);
           }
         }
       }
@@ -103,7 +102,7 @@ char* RetrieveFileAccessInfo(const char* filePath) {
     LocalFree(pSD);
   }
   else {
-    result << "Failed to get security information for " << filePath << std::endl;
+    result << "Failed to get security information for file." << "\r\n";
   }
 
   size_t size = result.str().size() + 1;
@@ -112,7 +111,64 @@ char* RetrieveFileAccessInfo(const char* filePath) {
   return output;
 }
 
-typedef char* (*RetrieveAccessMaskStringFunc)(const char*);
+char* RetrieveKernelObjectAccessInfo(HANDLE kernelHandle) {
+  static std::stringstream result;
+  result.str("");
+
+  // Получение информации безопасности для объекта ядра
+  PSECURITY_DESCRIPTOR pSD = NULL;
+  DWORD length = 0;
+
+  // Получаем размер буфера
+  if (!GetKernelObjectSecurity(kernelHandle, DACL_SECURITY_INFORMATION, NULL, 0, &length)) {
+    DWORD lastError = GetLastError();
+    if (lastError != ERROR_INSUFFICIENT_BUFFER) {
+      result << "Failed to get security descriptor size for kernel object." << "\r\n";
+      return NULL;
+    }
+  }
+
+  pSD = (PSECURITY_DESCRIPTOR)malloc(length);
+  if (!pSD) {
+    result << "Memory allocation failed." << "\r\n";
+    return NULL;
+  }
+
+  // Получаем саму информацию безопасности
+  if (GetKernelObjectSecurity(kernelHandle, DACL_SECURITY_INFORMATION, pSD, length, &length)) {
+    PACL pDacl;
+    BOOL bDaclPresent, bDaclDefaulted;
+
+    if (GetSecurityDescriptorDacl(pSD, &bDaclPresent, &pDacl, &bDaclDefaulted)) {
+      if (bDaclPresent) {
+        for (DWORD i = 0; i < pDacl->AceCount; ++i) {
+          PACE_HEADER pAceHeader;
+          if (GetAce(pDacl, i, (LPVOID*)&pAceHeader)) {
+            RetrieveAceInfo(pAceHeader, result);
+          }
+        }
+      }
+    }
+    else {
+      result << "Failed to get DACL for kernel object." << "\r\n";
+    }
+  }
+  else {
+    result << "Failed to get security information for kernel object." << "\r\n";
+  }
+
+  free(pSD);
+
+  // Возвращаем строку с результатом
+  size_t size = result.str().size() + 1;
+  char* output = new char[size];
+  strcpy_s(output, size, result.str().c_str());
+  return output;
+}
+
+typedef char* (*RetrieveFileAccessMaskByPathProc)(const char*);
+typedef char* (*RetrieveFileAccessMaskByHandleProc)(HANDLE);
+typedef char* (*RetrieveKernelObjAccessMaskProc)(HANDLE);
 
 int main() {
   HMODULE hModule = LoadLibrary(L"AccessMaskProcessor.dll");
@@ -121,25 +177,59 @@ int main() {
     return 1;
   }
 
-  // Получение адреса функции
-  RetrieveAccessMaskStringFunc RetrieveAccessMaskString = (RetrieveAccessMaskStringFunc)GetProcAddress(hModule, "RetrieveFileAccessInfo");
-  if (RetrieveAccessMaskString == NULL) {
+  //  --------------------------------------------------------------
+
+  RetrieveFileAccessMaskByPathProc RetrieveFileAccessMaskByPath = (RetrieveFileAccessMaskByPathProc)GetProcAddress(hModule, "RetrieveFileAccessInfoByPath");
+  if (RetrieveFileAccessMaskByPath == NULL) {
     std::wcerr << L"Failed to find function!" << std::endl;
     FreeLibrary(hModule);
     return 1;
   }
 
+  const char* filePath = "C:/Users/Queue/Downloads/Reterraforged-Mod-Forge-1.20.1.jar";
+  char* result1 = RetrieveFileAccessMaskByPath(filePath);
+  std::cout << "FILE by PATH: " << filePath << std::endl << result1 << std::endl;
+  delete[] result1;
 
-  //const char* filePath1 = "C:/Users/Queue/Downloads/test123.txt";
-  const char* filePath1 = "C:/Users/Queue/Downloads/Reterraforged-Mod-Forge-1.20.1.jar";
-  char* result1 = RetrieveAccessMaskString(filePath1);
-  std::cout << result1 << std::endl;
-  delete[] result1;  // Don't forget to free the memory!
+  //  --------------------------------------------------------------
 
-  //const char* filePath2 = "C:\\Windows\\System32";
-  //char* result2 = GetFileAccessInfo(filePath2);
-  //std::cout << result2 << std::endl;
-  //delete[] result2;  // Don't forget to free the memory!
+  RetrieveFileAccessMaskByHandleProc RetrieveFileAccessMaskByHandle = (RetrieveFileAccessMaskByHandleProc)GetProcAddress(hModule, "RetrieveFileAccessInfoByHandle");
+  if (RetrieveFileAccessMaskByHandle == NULL) {
+    std::wcerr << L"Failed to find function!" << std::endl;
+    FreeLibrary(hModule);
+    return 1;
+  }
+
+  HANDLE hFile = CreateFileA("C:/Users/Queue/Downloads/Reterraforged-Mod-Forge-1.20.1.jar", GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (hFile == INVALID_HANDLE_VALUE) {
+    std::cerr << "Failed to open file!" << std::endl;
+    return 1;
+  }
+
+  char* result2 = RetrieveFileAccessMaskByHandle(hFile);
+  std::cout << "FILE by HANDLE: " << filePath << std::endl << result2 << std::endl;
+  delete[] result2;
+  CloseHandle(hFile);
+
+  //  --------------------------------------------------------------
+
+  RetrieveKernelObjAccessMaskProc RetrieveKernelObjAccessMask = (RetrieveKernelObjAccessMaskProc)GetProcAddress(hModule, "RetrieveKernelObjAccessInfo");
+  if (RetrieveKernelObjAccessMask == NULL) {
+    std::wcerr << L"Failed to find function!" << std::endl;
+    FreeLibrary(hModule);
+    return 1;
+  }
+
+  HANDLE hMutex = CreateMutexA(NULL, FALSE, "MyTestMutex");
+  if (hMutex == NULL) {
+    std::cerr << "Failed to create mutex!" << std::endl;
+    return 1;
+  }
+
+  char* result3 = RetrieveKernelObjAccessMask(hMutex);
+  std::cout << "MUTEX:\n" << result3 << std::endl;
+  delete[] result3;
+  CloseHandle(hMutex);
 
   return 0;
 }

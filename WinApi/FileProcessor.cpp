@@ -2,7 +2,7 @@
 #include <locale>
 #include <codecvt>
 
-typedef char* (*RetrieveAccessMaskStringFunc)(const char*);
+typedef char* (*RetrieveFileAccessMaskByPathProc)(const char*);
 
 void RetrieveFileAccessMask(wchar_t* filePath, HWND hWnd, HWND TextBox) {
   HMODULE hModule = LoadLibrary(L"AccessMaskProcessor.dll");
@@ -11,7 +11,7 @@ void RetrieveFileAccessMask(wchar_t* filePath, HWND hWnd, HWND TextBox) {
     return;
   }
 
-  RetrieveAccessMaskStringFunc RetrieveAccessMaskString = (RetrieveAccessMaskStringFunc)GetProcAddress(hModule, "RetrieveFileAccessInfo");
+  RetrieveFileAccessMaskByPathProc RetrieveAccessMaskString = (RetrieveFileAccessMaskByPathProc)GetProcAddress(hModule, "RetrieveFileAccessInfoByPath");
   if (RetrieveAccessMaskString == NULL) {
     MessageBox(hWnd, L"Failed to find function!", L"Error", MB_OK);
     FreeLibrary(hModule);

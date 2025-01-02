@@ -49,7 +49,7 @@ void DecodeAccessMask(DWORD mask, std::stringstream& result) {
   if (mask & SYNCHRONIZE) result << "SYNCHRONIZE" << "\r\n";
 }
 
-void RetrieveAceInfo(PACE_HEADER pAceHeader, std::set<std::string>& uniqueUsers, std::stringstream& result) {
+void RetrieveAceInfo(PACE_HEADER pAceHeader, std::stringstream& result) {
   ACCESS_ALLOWED_ACE* pAce = (ACCESS_ALLOWED_ACE*)pAceHeader;
   char* accountName = NULL;
   char* domainName = NULL;
@@ -74,7 +74,7 @@ void RetrieveAceInfo(PACE_HEADER pAceHeader, std::set<std::string>& uniqueUsers,
   free(domainName);
 }
 
-extern "C" __declspec(dllexport) char* RetrieveFileAccessInfo(const char* filePath) {
+extern "C" __declspec(dllexport) char* RetrieveFileAccessInfoByPath(const char* filePath) {
   static std::stringstream result;
   result.str("");
 
@@ -85,11 +85,10 @@ extern "C" __declspec(dllexport) char* RetrieveFileAccessInfo(const char* filePa
 
     if (GetSecurityDescriptorDacl(pSD, &bDaclPresent, &pDacl, &bDaclDefaulted)) {
       if (bDaclPresent) {
-        std::set<std::string> uniqueUsers;
         for (DWORD i = 0; i < pDacl->AceCount; ++i) {
           PACE_HEADER pAceHeader;
           if (GetAce(pDacl, i, (LPVOID*)&pAceHeader)) {
-            RetrieveAceInfo(pAceHeader, uniqueUsers, result);
+            RetrieveAceInfo(pAceHeader, result);
           }
         }
       }
@@ -100,6 +99,92 @@ extern "C" __declspec(dllexport) char* RetrieveFileAccessInfo(const char* filePa
     result << "Failed to get security information for " << filePath << "\r\n";
   }
 
+  size_t size = result.str().size() + 1;
+  char* output = new char[size];
+  strcpy_s(output, size, result.str().c_str());
+  return output;
+}
+
+extern "C" __declspec(dllexport) char* RetrieveFileAccessInfoByHandle(HANDLE fileHandle) {
+  static std::stringstream result;
+  result.str("");
+
+  PSECURITY_DESCRIPTOR pSD;
+  if (GetSecurityInfo(fileHandle, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, NULL, NULL, NULL, NULL, &pSD) == ERROR_SUCCESS) {
+    PACL pDacl;
+    BOOL bDaclPresent, bDaclDefaulted;
+
+    if (GetSecurityDescriptorDacl(pSD, &bDaclPresent, &pDacl, &bDaclDefaulted)) {
+      if (bDaclPresent) {
+        for (DWORD i = 0; i < pDacl->AceCount; ++i) {
+          PACE_HEADER pAceHeader;
+          if (GetAce(pDacl, i, (LPVOID*)&pAceHeader)) {
+            RetrieveAceInfo(pAceHeader, result);
+          }
+        }
+      }
+    }
+    LocalFree(pSD);
+  }
+  else {
+    result << "Failed to get security information for file." << "\r\n";
+  }
+
+  size_t size = result.str().size() + 1;
+  char* output = new char[size];
+  strcpy_s(output, size, result.str().c_str());
+  return output;
+}
+
+extern "C" __declspec(dllexport) char* RetrieveKernelObjAccessInfo(HANDLE kernelHandle) {
+  static std::stringstream result;
+  result.str("");
+
+  // Получение информации безопасности для объекта ядра
+  PSECURITY_DESCRIPTOR pSD = NULL;
+  DWORD length = 0;
+
+  // Получаем размер буфера
+  if (!GetKernelObjectSecurity(kernelHandle, DACL_SECURITY_INFORMATION, NULL, 0, &length)) {
+    DWORD lastError = GetLastError();
+    if (lastError != ERROR_INSUFFICIENT_BUFFER) {
+      result << "Failed to get security descriptor size for kernel object." << "\r\n";
+      return NULL;
+    }
+  }
+
+  pSD = (PSECURITY_DESCRIPTOR)malloc(length);
+  if (!pSD) {
+    result << "Memory allocation failed." << "\r\n";
+    return NULL;
+  }
+
+  // Получаем саму информацию безопасности
+  if (GetKernelObjectSecurity(kernelHandle, DACL_SECURITY_INFORMATION, pSD, length, &length)) {
+    PACL pDacl;
+    BOOL bDaclPresent, bDaclDefaulted;
+
+    if (GetSecurityDescriptorDacl(pSD, &bDaclPresent, &pDacl, &bDaclDefaulted)) {
+      if (bDaclPresent) {
+        for (DWORD i = 0; i < pDacl->AceCount; ++i) {
+          PACE_HEADER pAceHeader;
+          if (GetAce(pDacl, i, (LPVOID*)&pAceHeader)) {
+            RetrieveAceInfo(pAceHeader, result);
+          }
+        }
+      }
+    }
+    else {
+      result << "Failed to get DACL for kernel object." << "\r\n";
+    }
+  }
+  else {
+    result << "Failed to get security information for kernel object." << "\r\n";
+  }
+
+  free(pSD);
+
+  // Возвращаем строку с результатом
   size_t size = result.str().size() + 1;
   char* output = new char[size];
   strcpy_s(output, size, result.str().c_str());
