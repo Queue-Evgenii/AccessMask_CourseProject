@@ -5,9 +5,9 @@ void DecodeReadAccessBits(DWORD mask, std::stringstream& result) {
     result << "GENERIC_READ" << "\r\n";
   }
   else {
-    if (mask & FILE_READ_DATA) result << "FILE_READ_DATA" << "\r\n";
-    if (mask & FILE_READ_ATTRIBUTES) result << "FILE_READ_ATTRIBUTES" << "\r\n";
-    if (mask & FILE_READ_EA) result << "FILE_READ_EA" << "\r\n";
+    if (mask & FILE_READ_DATA) result << "OBJECT_READ_DATA" << "\r\n";
+    if (mask & FILE_READ_ATTRIBUTES) result << "OBJECT_READ_ATTRIBUTES" << "\r\n";
+    if (mask & FILE_READ_EA) result << "OBJECT_READ_EA" << "\r\n";
     if (mask & STANDARD_RIGHTS_READ) result << "STANDARD_RIGHTS_READ" << "\r\n";
   }
 }
@@ -17,10 +17,10 @@ void DecodeWriteAccessBits(DWORD mask, std::stringstream& result) {
     result << "GENERIC_WRITE" << "\r\n";
   }
   else {
-    if (mask & FILE_WRITE_DATA) result << "FILE_WRITE_DATA" << "\r\n";
-    if (mask & FILE_APPEND_DATA) result << "FILE_APPEND_DATA" << "\r\n";
-    if (mask & FILE_WRITE_ATTRIBUTES) result << "FILE_WRITE_ATTRIBUTES" << "\r\n";
-    if (mask & FILE_WRITE_EA) result << "FILE_WRITE_EA" << "\r\n";
+    if (mask & FILE_WRITE_DATA) result << "OBJECT_WRITE_DATA" << "\r\n";
+    if (mask & FILE_APPEND_DATA) result << "OBJECT_APPEND_DATA" << "\r\n";
+    if (mask & FILE_WRITE_ATTRIBUTES) result << "OBJECT_WRITE_ATTRIBUTES" << "\r\n";
+    if (mask & FILE_WRITE_EA) result << "OBJECT_WRITE_EA" << "\r\n";
     if (mask & STANDARD_RIGHTS_WRITE) result << "STANDARD_RIGHTS_WRITE" << "\r\n";
   }
 }
@@ -30,7 +30,7 @@ void DecodeExecuteAccessBits(DWORD mask, std::stringstream& result) {
     result << "GENERIC_EXECUTE" << "\r\n";
   }
   else {
-    if (mask & FILE_EXECUTE) result << "FILE_EXECUTE" << "\r\n";
+    if (mask & FILE_EXECUTE) result << "OBJECT_EXECUTE" << "\r\n";
     if (mask & STANDARD_RIGHTS_EXECUTE) result << "STANDARD_RIGHTS_EXECUTE" << "\r\n";
   }
 }
@@ -140,27 +140,8 @@ extern "C" __declspec(dllexport) char* RetrieveKernelObjAccessInfo(HANDLE kernel
   static std::stringstream result;
   result.str("");
 
-  // Получение информации безопасности для объекта ядра
-  PSECURITY_DESCRIPTOR pSD = NULL;
-  DWORD length = 0;
-
-  // Получаем размер буфера
-  if (!GetKernelObjectSecurity(kernelHandle, DACL_SECURITY_INFORMATION, NULL, 0, &length)) {
-    DWORD lastError = GetLastError();
-    if (lastError != ERROR_INSUFFICIENT_BUFFER) {
-      result << "Failed to get security descriptor size for kernel object." << "\r\n";
-      return NULL;
-    }
-  }
-
-  pSD = (PSECURITY_DESCRIPTOR)malloc(length);
-  if (!pSD) {
-    result << "Memory allocation failed." << "\r\n";
-    return NULL;
-  }
-
-  // Получаем саму информацию безопасности
-  if (GetKernelObjectSecurity(kernelHandle, DACL_SECURITY_INFORMATION, pSD, length, &length)) {
+  PSECURITY_DESCRIPTOR pSD;
+  if (GetSecurityInfo(kernelHandle, SE_KERNEL_OBJECT, DACL_SECURITY_INFORMATION, NULL, NULL, NULL, NULL, &pSD) == ERROR_SUCCESS) {
     PACL pDacl;
     BOOL bDaclPresent, bDaclDefaulted;
 
@@ -174,17 +155,12 @@ extern "C" __declspec(dllexport) char* RetrieveKernelObjAccessInfo(HANDLE kernel
         }
       }
     }
-    else {
-      result << "Failed to get DACL for kernel object." << "\r\n";
-    }
+    LocalFree(pSD);
   }
   else {
-    result << "Failed to get security information for kernel object." << "\r\n";
+    result << "Failed to get security information for file." << "\r\n";
   }
 
-  free(pSD);
-
-  // Возвращаем строку с результатом
   size_t size = result.str().size() + 1;
   char* output = new char[size];
   strcpy_s(output, size, result.str().c_str());
