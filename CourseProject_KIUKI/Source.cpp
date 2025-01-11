@@ -66,5 +66,48 @@ int main() {
   delete[] result3;
   CloseHandle(hMutex);
 
+  // --------------------------------------------------------------
+
+  HANDLE hSemaphore = CreateSemaphoreA(NULL, 1, 1, "MyTestSemaphore");
+  if (hSemaphore == NULL) {
+    std::cerr << "Failed to create semaphore!" << std::endl;
+    return 1;
+  }
+
+  char* result4 = RetrieveKernelObjAccessMask(hSemaphore);
+  std::cout << "SEMAPHORE:\n" << result4 << std::endl;
+  delete[] result4;
+  CloseHandle(hSemaphore);
+
+  // --------------------------------------------------------------
+
+  HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, GetCurrentProcessId());
+  if (hProcess == NULL) {
+    std::cerr << "Failed to open process!" << std::endl;
+    return 1;
+  }
+
+  char* result5 = RetrieveKernelObjAccessMask(hProcess);
+  std::cout << "PROCESS:\n" << result5 << std::endl;
+  delete[] result5;
+  CloseHandle(hProcess);
+
+  // --------------------------------------------------------------
+
+  HANDLE hThread = CreateThread(NULL, 0, [](LPVOID) -> DWORD { return 0; }, NULL, 0, NULL);
+  if (hThread == NULL) {
+    std::cerr << "Failed to create thread!" << std::endl;
+    return 1;
+  }
+
+  char* result6 = RetrieveKernelObjAccessMask(hThread);
+  std::cout << "THREAD:\n" << result6 << std::endl;
+  delete[] result6;
+  CloseHandle(hThread);
+
+  // --------------------------------------------------------------
+
+
+  FreeLibrary(hModule);
   return 0;
 }
